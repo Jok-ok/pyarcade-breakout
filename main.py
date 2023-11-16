@@ -1,255 +1,308 @@
-from typing import Set
+"""Very simple breakout clone. A circle shape serves as the paddle, then
+breakable bricks constructed of Poly-shapes.
 
-import arcade
+The code showcases several pymunk concepts such as elasitcity, impulses,
+constant object speed, joints, collision handlers and post step callbacks.
+"""
+
+import random
+import sys
+import time
+from threading import Thread
+import neat
+import os
+
+import pygame
+
 import pymunk
-import timeit
-import math
+import pymunk.pygame_util
+from pymunk import Vec2d
 
-from block import Block
-from wall import WallConfigurator, Wall
-from ball import BallSprite
-from paddle import Paddle
-from physics_sprite import PhysicsSprite
-
-from consts import *
+width, height = 1000, 800
 
 
-class MyGame(arcade.Window):
-    """ Main application class. """
+collision_types = {
+    "ball": 1,
+    "brick": 2,
+    "bottom": 3,
+    "player": 4,
+}
 
-    def __init__(self, width: int, height: int, title: str):
-        super().__init__(width, height, title)
 
-        arcade.set_background_color(arcade.color.BLACK)
+def spawn_ball(space, position, direction):
+    global ball_body
+    ball_body = pymunk.Body(1, float("inf"))
+    ball_body.position = position
 
-        # -- Pymunk
-        self.space = pymunk.Space()
-        self.space.iterations = 35
-        self.space.gravity = (0.0, 0.0)
+    ball_shape = pymunk.Circle(ball_body, 5)
+    ball_shape.color = pygame.Color("green")
+    ball_shape.elasticity = 1.0
+    ball_shape.collision_type = collision_types["ball"]
 
-        # List of pressed now keys
-        self.pressed_keys: Set[int] = set()
+    ball_body.apply_impulse_at_local_point(Vec2d(*direction))
 
-        # Lists of sprites or lines
-        self.sprite_list: arcade.SpriteList[PhysicsSprite] = arcade.SpriteList()
-        self.static_lines: list[pymunk.Segment] = []
+    # Keep ball velocity at a static value
+    def constant_velocity(body, gravity, damping, dt):
+        body.velocity = body.velocity.normalized() * 2000
 
-        # Used for dragging shapes around with the mouse
-        self.shape_being_dragged = None
-        self.last_mouse_position = 0, 0
+    ball_body.velocity_func = constant_velocity
 
-        self.draw_time = 0
-        self.processing_time = 0
+    space.add(ball_body, ball_shape)
+    return ball_shape
 
-        self.paddle = Paddle((SCREEN_WIDTH/2, 100))
-        # Create the walls
-        up_wall = WallConfigurator.horizontal(y_pos=SCREEN_HEIGHT)
-        left_wall = WallConfigurator.vertical(x_pos=0)
-        right_wall = WallConfigurator.vertical(x_pos=SCREEN_WIDTH)
 
-        self.create_wall(up_wall)
-        self.create_wall(left_wall)
-        self.create_wall(right_wall)
+def setup_level(space, player_body, brick_destroyed_callback):
 
-        # Create the paddle
-        self.paddle_body = self.create_paddle(self.paddle)
+    # Remove balls and bricks
+    for s in space.shapes[:]:
+        if s.body.body_type == pymunk.Body.DYNAMIC and s.body not in [player_body]:
+            space.remove(s.body, s)
 
-        # Create blocks
-        self.blocks = []
-        block_x = 50
-        block_y = SCREEN_HEIGHT-50
-        for i in range(5):
-            for j in range(18):
-                block = Block((block_x, block_y), 50, 25, 0, 1, 1)
-                block_body = self.create_block(block)
-                self.blocks.append(block_body)
-                block_x += 52
-            block_x = 50
-            block_y -= 27
+    # Spawn a ball for the player to have something to play with
+    spawn_ball(
+        space, player_body.position + (0, 40), random.choice([(1, 10), (-1, 10)])
+    )
 
-        self.score = 0
-        collision_handler = self.space.add_collision_handler(CollisionTypes.BALL, CollisionTypes.BRICK)
-        collision_handler.separate = self.on_brick_hit
+    # Spawn bricks
+    for x in range(0, 41):
+        x = x * 20 + 100
+        for y in range(0, 10):
+            y = y * 10 + height - 200
+            brick_body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+            brick_body.position = x, y
+            brick_shape = pymunk.Poly.create_box(brick_body, (20, 10))
+            brick_shape.elasticity = 1.0
+            brick_shape.color = pygame.Color("blue")
+            brick_shape.group = 1
+            brick_shape.collision_type = collision_types["brick"]
+            space.add(brick_body, brick_shape)
 
-    def on_brick_hit(self, arbiter, space, data) -> None:
-        """
-        On brick hit event
-        delete a brick from space
-        :param arbiter:
-        :param space:
-        :param data:
-        :return:
-        """
-        brick_shape = arbiter.shapes[1]
+    # Make bricks be removed when hit by ball
+    def remove_brick(arbiter, space, data):
+        brick_shape = arbiter.shapes[0]
         space.remove(brick_shape, brick_shape.body)
-        self.score += 10
+        brick_destroyed_callback()
 
-    def on_draw(self) -> None:
-        """
-        Render the screen.
-        """
-
-        # This command has to happen before we start drawing
-        self.clear()
-
-        # Start timing how long this takes
-        draw_start_time = timeit.default_timer()
-
-        # Draw all the sprites
-        self.sprite_list.draw()
-
-        # Draw the lines that aren't sprites
-        for line in self.static_lines:
-            body = line.body
-
-            pv1 = body.position + line.a.rotated(body.angle)
-            pv2 = body.position + line.b.rotated(body.angle)
-            arcade.draw_line(pv1.x, pv1.y, pv2.x, pv2.y, arcade.color.WHITE, 2)
-
-        # Display timings
-        output = f"Processing time: {self.processing_time:.3f}"
-        arcade.draw_text(output, 20, SCREEN_HEIGHT - 20, arcade.color.WHITE, 12)
-
-        output = f"Drawing time: {self.draw_time:.3f}"
-        arcade.draw_text(output, 20, SCREEN_HEIGHT - 40, arcade.color.WHITE, 12)
-
-        output = f"Score: {self.score}"
-        arcade.draw_text(output, SCREEN_WIDTH/2-20, SCREEN_HEIGHT - 20, arcade.color.GOLD, 16)
-
-        self.draw_time = timeit.default_timer() - draw_start_time
-
-    def on_mouse_press(self, x: float, y: float, button: int, modifiers: int) -> None:
-        if button == arcade.MOUSE_BUTTON_LEFT:
-            self.last_mouse_position = x, y
-            # See if we clicked on anything
-            shape_list = self.space.point_query((x, y), 1, pymunk.ShapeFilter())
-
-            # If we did, remember what we clicked on
-            if len(shape_list) > 0:
-                self.shape_being_dragged = shape_list[0]
-
-        elif button == arcade.MOUSE_BUTTON_RIGHT:
-            # With right mouse button, shoot a heavy coin fast.
-            radius = 10
-            self.create_ball(x, y, radius)
-
-    def on_key_press(self, symbol: int, modifiers: int) -> None:
-        if symbol == arcade.key.LEFT:
-            self.set_paddle_x_velocity(-1000)
-            if arcade.key.RIGHT in self.pressed_keys:
-                self.pressed_keys.remove(arcade.key.RIGHT)
-        elif symbol == arcade.key.RIGHT:
-            self.set_paddle_x_velocity(1000)
-            if arcade.key.LEFT in self.pressed_keys:
-                self.pressed_keys.remove(arcade.key.LEFT)
-
-        self.pressed_keys.add(symbol)
-
-    def on_key_release(self, symbol: int, modifiers: int) -> None:
-        if symbol in self.pressed_keys:
-            self.pressed_keys.remove(symbol)
-        if symbol in (arcade.key.LEFT, arcade.key.RIGHT) and len(self.pressed_keys) == 0:
-            self.set_paddle_x_velocity(0)
-
-    def create_wall(self, wall: Wall) -> None:
-        body = pymunk.Body(body_type=pymunk.Body.STATIC)
-        shape = pymunk.Segment(body, wall.point_1, wall.point_2, radius=wall.radius)
-        shape.friction = wall.friction
-        shape.elasticity = wall.elasticity
-        shape.collision_type = CollisionTypes.WALL
-
-        self.space.add(shape, body)
-        self.static_lines.append(shape)
-
-    def on_update(self, delta_time: float) -> None:
-        start_time = timeit.default_timer()
-
-        # Check for balls that fall off the screen
-        for sprite in self.sprite_list:
-            if sprite.pymunk_shape.body.space == None:
-                sprite.remove_from_sprite_lists()
-            if sprite.pymunk_shape.body.position.y < 0:
-                # Remove balls from physics space
-                self.space.remove(sprite.pymunk_shape, sprite.pymunk_shape.body)
-                # Remove balls from physics list
-                sprite.remove_from_sprite_lists()
-
-        # Update physics
-        # Use a constant time step, don't use delta_time
-        # See "Game loop / moving time forward"
-        # https://www.pymunk.org/en/latest/overview.html#game-loop-moving-time-forward
-        self.space.step(1 / 60.0)
-
-        # If we are dragging an object, make sure it stays with the mouse. Otherwise
-        # gravity will drag it down.
-        if self.shape_being_dragged is not None:
-            self.shape_being_dragged.shape.body.position = self.last_mouse_position
-            self.shape_being_dragged.shape.body.velocity = 0, -100
-
-        # Move sprites to where physics objects are
-        for sprite in self.sprite_list:
-            sprite.center_x = sprite.pymunk_shape.body.position.x
-            sprite.center_y = sprite.pymunk_shape.body.position.y
-            sprite.angle = math.degrees(sprite.pymunk_shape.body.angle)
-
-        # Save the time it took to do this.
-        self.processing_time = timeit.default_timer() - start_time
-
-    def create_ball(self, x: float, y: float, radius: float = 10, mass: float = 1) -> None:
-        mass = mass
-        radius = radius
-        inertia = pymunk.moment_for_circle(mass, 0, radius, (0, 0))
-        body = pymunk.Body(mass, inertia)
-        body.position = x, y
-        body.apply_impulse_at_local_point(pymunk.Vec2d(500,500))
-        shape = pymunk.Circle(body, radius, pymunk.Vec2d(0, 0))
-        shape.collision_type = CollisionTypes.BALL
-        shape.friction = 1000
-        shape.elasticity = 1
-        self.space.add(body, shape)
-
-        sprite = BallSprite(shape, "Resources/ball.png")
-        self.sprite_list.append(sprite)
-
-    def set_paddle_x_velocity(self, x_velocity: float) -> None:
-        self.paddle_body.velocity = (x_velocity, 0)
-
-    def create_paddle(self, paddle: Paddle) -> pymunk.Body:
-        paddle_body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
-        shape = pymunk.Poly.create_box(paddle_body, (paddle.width, paddle.height))
-        shape.friction = paddle.friction
-        shape.elasticity = paddle.elasticity
-        paddle_body.position = pymunk.Vec2d(paddle.pos[0], paddle.pos[1])
-        shape.collision_type = CollisionTypes.PLAYER
-
-        sprite = PhysicsSprite(shape, "Resources/paddle.png")
-
-        self.space.add(paddle_body, shape)
-        self.sprite_list.append(sprite)
-
-        return paddle_body
-
-    def create_block(self, block: Block) -> pymunk.Body:
-        block_body = pymunk.Body(body_type=pymunk.Body.STATIC)
-        shape = pymunk.Poly.create_box(block_body, (block.width, block.height))
-        shape.friction = block.friction
-        shape.elasticity = block.elasticity
-        block_body.position = pymunk.Vec2d(block.pos[0], block.pos[1])
-        shape.collision_type = CollisionTypes.BRICK
-        sprite = PhysicsSprite(shape, "Resources/brick.png")
+    h = space.add_collision_handler(collision_types["brick"], collision_types["ball"])
+    h.separate = remove_brick
 
 
-        self.space.add(block_body, shape)
-        self.sprite_list.append(sprite)
+def main(game_end_callback, game_update_callback, brick_destroyed_callback, ball_collision_callback):
+    ### PyGame init
+    pygame.init()
+    screen = pygame.display.set_mode((width, height))
+    clock = pygame.time.Clock()
+    running = True
+    font = pygame.font.SysFont("Arial", 16)
+    ### Physics stuff
+    space = pymunk.Space()
+    pymunk.pygame_util.positive_y_is_up = True
+    draw_options = pymunk.pygame_util.DrawOptions(screen)
 
-        return block_body
+    ### Game area
+    # walls - the left-top-right walls
+
+    static_lines = [
+        pymunk.Segment(space.static_body, (50, 50), (50, height-50), 10),
+        pymunk.Segment(space.static_body, (50, height-50), (width-50, height-50), 10),
+        pymunk.Segment(space.static_body, (width-50, height-50), (width-50, 50), 10),
+    ]
+    for line in static_lines:
+        line.color = pygame.Color("lightgray")
+        line.elasticity = 1.0
+
+    space.add(*static_lines)
+
+    # bottom - a sensor that removes anything touching it
+    bottom = pymunk.Segment(space.static_body, (50, 50), (width-50, 50), 10)
+    bottom.sensor = True
+    bottom.collision_type = collision_types["bottom"]
+    bottom.color = pygame.Color("red")
+
+    def remove_first(arbiter, space, data):
+        ball_shape = arbiter.shapes[0]
+        space.remove(ball_shape, ball_shape.body)
+        game_end_callback()
+        return True
+
+    h = space.add_collision_handler(collision_types["ball"], collision_types["bottom"])
+    h.begin = remove_first
+    space.add(bottom)
+
+    ### Player ship
+    global player_body
+    player_body = pymunk.Body(500, float("inf"))
+    player_body.position = width/2, 100
+
+    player_shape = pymunk.Segment(player_body, (-50, 0), (50, 0), 15)
+    player_shape.color = pygame.Color("red")
+    player_shape.elasticity = 1.0
+    player_shape.collision_type = collision_types["player"]
+
+    def pre_solve(arbiter, space, data):
+        # We want to update the collision normal to make the bounce direction
+        # dependent of where on the paddle the ball hits. Note that this
+        # calculation isn't perfect, but just a quick example.
+        set_ = arbiter.contact_point_set
+        if len(set_.points) > 0:
+            player_shape = arbiter.shapes[0]
+            width = (player_shape.b - player_shape.a).x
+            delta = (player_shape.body.position - set_.points[0].point_a).x
+            normal = Vec2d(0, 1).rotated(delta / width / 2)
+            set_.normal = normal
+            set_.points[0].distance = 0
+        arbiter.contact_point_set = set_
+        ball_collision_callback()
+        return True
+
+    h = space.add_collision_handler(collision_types["player"], collision_types["ball"])
+    h.pre_solve = pre_solve
+
+    # restrict movement of player to a straigt line
+    move_joint = pymunk.GrooveJoint(
+        space.static_body, player_body, (100, 100), (width-100, 100), (0, 0)
+    )
+    space.add(player_body, player_shape, move_joint)
+    global state
+    # Start game
+    setup_level(space, player_body, brick_destroyed_callback)
+    while running:
+        game_update_callback()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN and (
+                event.key in [pygame.K_ESCAPE, pygame.K_q]
+            ):
+                running = False
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_p:
+                pygame.image.save(screen, "breakout.png")
+
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_LEFT:
+                player_body.velocity = (-1000, 0)
+            elif event.type == pygame.KEYUP and event.key == pygame.K_LEFT:
+                player_body.velocity = 0, 0
+
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT:
+                player_body.velocity = (1000, 0)
+            elif event.type == pygame.KEYUP and event.key == pygame.K_RIGHT:
+                player_body.velocity = 0, 0
+
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
+                setup_level(space, player_body)
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                spawn_ball(
+                    space,
+                    player_body.position + (0, 40),
+                    random.choice([(1, 10), (-1, 10)]),
+                )
+
+        ### Clear screen
+        screen.fill(pygame.Color("black"))
+
+        ### Draw stuff
+        space.debug_draw(draw_options)
+
+        state = []
+        for x in space.shapes:
+            s = "%s %s %s" % (x, x.body.position, x.body.velocity)
+            state.append(s)
+
+        ### Update physics
+        fps = 150
+        dt = 1.0 / fps
+        space.step(dt)
+
+        ### Info and flip screen
+        screen.blit(
+            font.render("fps: " + str(clock.get_fps()), 1, pygame.Color("white")),
+            (0, 0),
+        )
+        screen.blit(
+            font.render(
+                "Move with left/right arrows, space to spawn a ball",
+                1,
+                pygame.Color("darkgrey"),
+            ),
+            (5, height - 35),
+        )
+        screen.blit(
+            font.render(
+                "Press R to reset, ESC or Q to quit", 1, pygame.Color("darkgrey")
+            ),
+            (5, height - 20),
+        )
+
+        pygame.display.flip()
+        clock.tick(fps)
 
 
-def main() -> None:
-    MyGame(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
+def eval_genomes(raw_genomes: list[neat.DefaultGenome], config):
+    global genomes, networks, tries
 
-    arcade.run()
+    tries = 0
+    networks = []
+    genomes = []
+
+    for _, g in raw_genomes:
+        net = neat.nn.FeedForwardNetwork.create(g, config)
+        networks.append(net)
+        g.fitness = 0
+        genomes.append(g)
+
+    run = True
+    threads = []
+    for i in range(len(genomes)):
+        print("Curren genome -> {}".format(genomes[i]))
+        main(game_end_callback=lambda: restart_game(i),
+             game_update_callback=lambda: update_event(i),
+             brick_destroyed_callback=lambda: add_val_to_fitness(i, 2),
+             ball_collision_callback=lambda: add_val_to_fitness(i, 15))
+
+
+
+def restart_game(gen_id):
+    global tries
+
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+    genomes[gen_id].fitness -= 10
+    tries += 1
+def add_val_to_fitness(gen_id, val):
+    genomes[gen_id].fitness += val
+
+def update_event(gen_id):
+    global genomes, player_body, ball_body
+    genomes[gen_id].fitness += 0.1
+
+    output = networks[gen_id].activate(
+        (ball_body.position.x, ball_body.position.y,
+         abs(player_body.position.y - ball_body.position.y),
+         abs(player_body.position.x - ball_body.position.x)))
+    general_output = output.index(max(output)) - 1
+
+    player_body.velocity = (general_output*2000, 0)
+
+
+def run(config_path):
+    config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
+                                neat.DefaultSpeciesSet, neat.DefaultStagnation,
+                                config_path)
+
+    p = neat.Population(config)
+
+    reporter = neat.reporting.StdOutReporter(True)
+    reporter.generation = True
+    reporter.show_species_detail = True
+    p.add_reporter(neat.reporting.StdOutReporter(True))
+    stats = neat.StatisticsReporter()
+    p.add_reporter(stats)
+
+    winner = p.run(eval_genomes)
+
+    print("Best fitness -> {}".format(winner))
 
 
 if __name__ == "__main__":
-    main()
+    local_dir = os.path.dirname(__file__)
+    config_path = os.path.join(local_dir, "config-FeedForward.txt")
+    run(config_path)
