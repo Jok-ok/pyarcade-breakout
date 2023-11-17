@@ -247,7 +247,7 @@ def eval_genomes(raw_genomes: list[neat.DefaultGenome], config):
     genomes = raw_genomes
 
     for _, g in raw_genomes:
-        net = neat.nn.FeedForwardNetwork.create(g, config)
+        net = neat.nn.RecurrentNetwork.create(g, config)
         networks.append(net)
         g.fitness = 0
 
@@ -301,7 +301,7 @@ def add_val_to_fitness(gen_id, val):
 
 def update_event(gen_id):
     global genomes, player_body, ball_body
-    add_val_to_fitness(gen_id, 0.001)
+    add_val_to_fitness(gen_id, 0.1)
     # if not (player_body.position.x > 100 and player_body.position.x < width - 100):
     #     add_val_to_fitness(gen_id, -20)
     #     pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
@@ -310,6 +310,14 @@ def update_event(gen_id):
         (ball_body.position.x, ball_body.position.y,
          abs(player_body.position.x-ball_body.position.x), abs(player_body.position.y-ball_body.position.x)))
     general_output = output.index(max(output)) - 1
+
+    if (player_body.position.x <= 100) and general_output == -1:
+        player_body.velocity = (0, 0)
+        return None
+
+    if (player_body.position.x >= width - 100) and general_output == 1:
+        player_body.velocity = (0, 0)
+        return None
 
     player_body.velocity = (general_output * 1000, 0)
 
