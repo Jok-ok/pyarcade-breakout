@@ -8,11 +8,7 @@ constant object speed, joints, collision handlers and post step callbacks.
 import random
 import neat
 import os
-import threading
-import pickle
 from functools import partial
-
-import multiprocessing
 
 import pygame
 
@@ -306,6 +302,7 @@ def update_event(gen_id):
     #     add_val_to_fitness(gen_id, -20)
     #     pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
 
+
     output = networks[gen_id].activate(
         (ball_body.position.x, ball_body.position.y,
          abs(player_body.position.x-ball_body.position.x), abs(player_body.position.y-ball_body.position.x)))
@@ -319,7 +316,7 @@ def update_event(gen_id):
         player_body.velocity = (0, 0)
         return None
 
-    player_body.velocity = (general_output * 1000, 0)
+    player_body.velocity = (general_output * 1500, 0)
 
 
 def run(config_path):
@@ -343,5 +340,5 @@ def run(config_path):
 
 if __name__ == "__main__":
     local_dir = os.path.dirname(__file__)
-    config_path = os.path.join(local_dir, "config-FeedForward.txt")
+    config_path = os.path.join(local_dir, "NeatConf.txt")
     run(config_path)

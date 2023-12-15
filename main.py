@@ -180,7 +180,7 @@ def main(game_end_callback, game_update_callback, brick_destroyed_callback, ball
                 pygame.image.save(screen, "breakout.png")
 
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_LEFT:
-                player_body.velocity = (-1000, 0)
+                player_body.velocity = (-1500, 0)
             elif event.type == pygame.KEYUP and event.key == pygame.K_LEFT:
                 player_body.velocity = 0, 0
 
@@ -333,7 +333,10 @@ def run(config_path):
     print("Best fitness -> {}".format(winner))
 
 
-if __name__ == "__main__":
+def run_learning(file_name: str):
     local_dir = os.path.dirname(__file__)
-    config_path = os.path.join(local_dir, "config-FeedForward.txt")
+    config_path = os.path.join(local_dir, file_name)
     run(config_path)
+
+if __name__ == "__main__":
+    run_learning("NeatConf.txt")
