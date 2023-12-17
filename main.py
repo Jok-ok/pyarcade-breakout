@@ -8,11 +8,8 @@ constant object speed, joints, collision handlers and post step callbacks.
 import random
 import neat
 import os
-import threading
-import pickle
 from functools import partial
-
-import multiprocessing
+from datetime import datetime
 
 import pygame
 
@@ -251,6 +248,7 @@ def eval_genomes(raw_genomes: list[neat.DefaultGenome], config):
         networks.append(net)
         g.fitness = 0
 
+
     genomes = raw_genomes
     run = True
     for i in range(len(genomes)):
@@ -258,6 +256,11 @@ def eval_genomes(raw_genomes: list[neat.DefaultGenome], config):
              partial(update_event, i),
              partial(add_val_to_fitness, i, 0),
              partial(add_val_to_fitness, i, 15), i)
+    # winner = genomes.sort(lambda x: x.fitness)[0]
+    # visualise.draw_net(config, winner, True, node_names=node_names)
+    # visualise.draw_net(config, winner, True, node_names=node_names, prune_unused=True)
+    # visualise.plot_stats(stats, ylog=False, view=True)
+    # visualise.plot_species(stats, view=True)
     # with multiprocessing.Pool(multiprocessing.cpu_count() - 1,
     #                           initializer=initialize_values, initargs=(raw_genomes, networks)) as pool:
     #     genomes = genomes
@@ -308,10 +311,10 @@ def update_event(gen_id):
 
     output = networks[gen_id].activate(
         (ball_body.position.x, ball_body.position.y,
-         abs(player_body.position.x-ball_body.position.x), abs(player_body.position.y-ball_body.position.x)))
+         abs(player_body.position.x-ball_body.position.x), abs(player_body.position.y-ball_body.position.y)))
     general_output = output.index(max(output)) - 1
 
-    player_body.velocity = (general_output * 1000, 0)
+    player_body.velocity = (general_output * 2000, 0)
 
 
 def run(config_path):
@@ -319,12 +322,21 @@ def run(config_path):
                                 neat.DefaultSpeciesSet, neat.DefaultStagnation,
                                 config_path)
 
+    current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
+    checkpoints_dir_name = f"checkpoints {current_time}"
+    os.mkdir(checkpoints_dir_name)
+
+    checkpointer = neat.Checkpointer(True, filename_prefix=f"{checkpoints_dir_name}/checkpoint_generation_")
+    checkpointer.generation = True
+    checkpointer.show_species_detail = True
+
     p = neat.Population(config)
 
     reporter = neat.reporting.StdOutReporter(True)
     reporter.generation = True
     reporter.show_species_detail = True
     p.add_reporter(neat.reporting.StdOutReporter(True))
+    p.add_reporter(checkpointer)
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
 
@@ -337,6 +349,17 @@ def run_learning(file_name: str):
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, file_name)
     run(config_path)
+
+
+def run_generation(num):
+    population = neat.Checkpointer.restore_checkpoint(f"checkpoints/checkpoint_generation{num}")
+    reporter = neat.reporting.StdOutReporter(True)
+    reporter.generation = True
+    reporter.show_species_detail = True
+    population.add_reporter(reporter)
+    population.add_reporter(neat.StatisticsReporter())
+
+    win = population.run(eval_genomes)
 
 if __name__ == "__main__":
     run_learning("NeatConf.txt")
