@@ -1,11 +1,4 @@
-attrs==23.1.0
-cffi==1.16.0
-mypy==1.7.0
-mypy-extensions==1.0.0
-Pillow==9.3.0
-pycparser==2.21
 pygame==2.5.2
-pyglet==2.0.dev23
 pymunk==6.4.0
-pytiled-parser==2.2.0
-typing_extensions==4.8.0
+customtkinter==5.2.1
+neat-python==0.92
