@@ -3,8 +3,10 @@ from customtkinter import (set_appearance_mode, set_default_color_theme, CTkLabe
                            CTkEntry, CTkFrame, CTkButton, CTkInputDialog)
 from app_consts import AppStrings
 
-set_appearance_mode("Dark")  # Modes: "System" (standard), "Dark", "Light"
-set_default_color_theme("green")  # Themes: "blue" (standard), "green", "dark-blue"
+set_appearance_mode("Dark")
+set_default_color_theme("green")
+
+
 class AppScreen(Tk):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -22,6 +24,7 @@ class AppScreen(Tk):
         self.start_learning_button.grid(row=1, column=0)
         self.configures_button.grid(row=2, column=0)
         self.load_generation_button.grid(row=3, column=0)
+
 
 if __name__ == "__main__":
     app = AppScreen()
