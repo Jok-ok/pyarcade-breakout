@@ -346,7 +346,7 @@ def run(config_path):
                                 neat.DefaultSpeciesSet, neat.DefaultStagnation,
                                 config_path)
 
-    current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
+    current_time = datetime.now().strftime("%d.%m.%Y %H_%M")
     GenerationCounter.current_time = current_time
     checkpoints_dir_name = f"checkpoints {current_time}"
     if not os.path.exists(checkpoints_dir_name):
