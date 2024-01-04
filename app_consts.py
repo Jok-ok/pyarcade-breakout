@@ -10,14 +10,19 @@ class AppStrings(StrEnum):
 
     start_learning_button = "Начать обучение"
     load_generation_button = "Загрузить поколение"
-    configure_settings_button = "Настроить параметры"
 
     config_file_not_found = "Файл конфигурации не найден!"
     set_path_to_config_file = "Укажите путь к файлу конфигурации."
 
+    loading_generation_file_error = "Ошибка загрузки файла чекпоинта."
+    select_correct_generation_file = "Повторите попытку и выберите корректный файл чекпоинта."
+
+    browse = "Обзор..."
+
+    select_generation_checkpoint = "Выберите файл поколения"
+
 
 class NeatConfigStrings(StrEnum):
     ...
-
 
 # TODO: Подумать над шрифтами
