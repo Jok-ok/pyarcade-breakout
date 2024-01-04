@@ -6,11 +6,11 @@ constant object speed, joints, collision handlers and post step callbacks.
 """
 
 import random
-import sys
-import time
-from threading import Thread
 import neat
 import os
+from functools import partial
+from datetime import datetime
+from sources.visualize import *
 
 import pygame
 
@@ -18,8 +18,21 @@ import pymunk
 import pymunk.pygame_util
 from pymunk import Vec2d
 
-width, height = 1000, 800
 
+class GenerationCounter:
+    generation_num: int = 0
+    current_time: str
+
+    @staticmethod
+    def add_generation():
+        GenerationCounter.generation_num += 1
+
+    @staticmethod
+    def set_current_time(time: str):
+        GenerationCounter.current_time = time
+
+
+width, height = 1000, 800
 
 collision_types = {
     "ball": 1,
@@ -52,7 +65,6 @@ def spawn_ball(space, position, direction):
 
 
 def setup_level(space, player_body, brick_destroyed_callback):
-
     # Remove balls and bricks
     for s in space.shapes[:]:
         if s.body.body_type == pymunk.Body.DYNAMIC and s.body not in [player_body]:
@@ -87,7 +99,7 @@ def setup_level(space, player_body, brick_destroyed_callback):
     h.separate = remove_brick
 
 
-def main(game_end_callback, game_update_callback, brick_destroyed_callback, ball_collision_callback):
+def main(game_end_callback, game_update_callback, brick_destroyed_callback, ball_collision_callback, gen_id):
     ### PyGame init
     pygame.init()
     screen = pygame.display.set_mode((width, height))
@@ -103,9 +115,9 @@ def main(game_end_callback, game_update_callback, brick_destroyed_callback, ball
     # walls - the left-top-right walls
 
     static_lines = [
-        pymunk.Segment(space.static_body, (50, 50), (50, height-50), 10),
-        pymunk.Segment(space.static_body, (50, height-50), (width-50, height-50), 10),
-        pymunk.Segment(space.static_body, (width-50, height-50), (width-50, 50), 10),
+        pymunk.Segment(space.static_body, (50, 50), (50, height - 50), 10),
+        pymunk.Segment(space.static_body, (50, height - 50), (width - 50, height - 50), 10),
+        pymunk.Segment(space.static_body, (width - 50, height - 50), (width - 50, 50), 10),
     ]
     for line in static_lines:
         line.color = pygame.Color("lightgray")
@@ -114,7 +126,7 @@ def main(game_end_callback, game_update_callback, brick_destroyed_callback, ball
     space.add(*static_lines)
 
     # bottom - a sensor that removes anything touching it
-    bottom = pymunk.Segment(space.static_body, (50, 50), (width-50, 50), 10)
+    bottom = pymunk.Segment(space.static_body, (50, 50), (width - 50, 50), 10)
     bottom.sensor = True
     bottom.collision_type = collision_types["bottom"]
     bottom.color = pygame.Color("red")
@@ -132,7 +144,7 @@ def main(game_end_callback, game_update_callback, brick_destroyed_callback, ball
     ### Player ship
     global player_body
     player_body = pymunk.Body(500, float("inf"))
-    player_body.position = width/2, 100
+    player_body.position = width / 2, 100
 
     player_shape = pymunk.Segment(player_body, (-50, 0), (50, 0), 15)
     player_shape.color = pygame.Color("red")
@@ -159,27 +171,30 @@ def main(game_end_callback, game_update_callback, brick_destroyed_callback, ball
     h.pre_solve = pre_solve
 
     # restrict movement of player to a straigt line
-    move_joint = pymunk.GrooveJoint(
-        space.static_body, player_body, (100, 100), (width-100, 100), (0, 0)
-    )
-    space.add(player_body, player_shape, move_joint)
+    # move_joint = pymunk.GrooveJoint(
+    #     space.static_body, player_body, (100, 100), (width - 100, 100), (0, 0)
+    # )
+    space.add(player_body, player_shape)
     global state
     # Start game
     setup_level(space, player_body, brick_destroyed_callback)
     while running:
         game_update_callback()
+
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            if event.type == pygame.USEREVENT:
                 running = False
+            if event.type == pygame.QUIT:
+                pygame.quit()
             elif event.type == pygame.KEYDOWN and (
-                event.key in [pygame.K_ESCAPE, pygame.K_q]
+                    event.key in [pygame.K_ESCAPE, pygame.K_q]
             ):
                 running = False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_p:
                 pygame.image.save(screen, "breakout.png")
 
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_LEFT:
-                player_body.velocity = (-1000, 0)
+                player_body.velocity = (-1500, 0)
             elif event.type == pygame.KEYUP and event.key == pygame.K_LEFT:
                 player_body.velocity = 0, 0
 
@@ -209,7 +224,7 @@ def main(game_end_callback, game_update_callback, brick_destroyed_callback, ball
             state.append(s)
 
         ### Update physics
-        fps = 150
+        fps = 200
         dt = 1.0 / fps
         space.step(dt)
 
@@ -235,6 +250,7 @@ def main(game_end_callback, game_update_callback, brick_destroyed_callback, ball
 
         pygame.display.flip()
         clock.tick(fps)
+    return genomes[gen_id]
 
 
 def eval_genomes(raw_genomes: list[neat.DefaultGenome], config):
@@ -242,45 +258,87 @@ def eval_genomes(raw_genomes: list[neat.DefaultGenome], config):
 
     tries = 0
     networks = []
-    genomes = []
+    genomes = raw_genomes
 
     for _, g in raw_genomes:
         net = neat.nn.FeedForwardNetwork.create(g, config)
         networks.append(net)
         g.fitness = 0
-        genomes.append(g)
 
+    genomes = raw_genomes
     run = True
-    threads = []
     for i in range(len(genomes)):
-        print("Curren genome -> {}".format(genomes[i]))
-        main(game_end_callback=lambda: restart_game(i),
-             game_update_callback=lambda: update_event(i),
-             brick_destroyed_callback=lambda: add_val_to_fitness(i, 2),
-             ball_collision_callback=lambda: add_val_to_fitness(i, 15))
+        main(partial(restart_game, i),
+             partial(update_event, i),
+             partial(add_val_to_fitness, i, 0),
+             partial(add_val_to_fitness, i, 15), i)
 
+    genomes = sorted(genomes, key=lambda x: x[1].fitness)
+    winner = genomes[0][1]
+    node_names = {-1: "Кооордината мяча X", -2: "Коррдината мяча Y", -3: "Разница между X шарика и X платформы",
+                  -4: "Разница между Y шарика и Y платформы", 0: "Движение влево", 1: "Стоять на месте",
+                  2: "Движение вправо"}
+    checkpoints_dir_name = f"checkpoints {GenerationCounter.current_time}"
+    draw_net(config, winner, True, node_names=node_names,
+             filename=f"{checkpoints_dir_name}/neuro_schemes/winner_{GenerationCounter.generation_num}.svg")
+    GenerationCounter.add_generation()
+
+    # visualise.plot_stats(stats, ylog=False, view=True)
+    # visualise.plot_species(stats, view=True)
+    # with multiprocessing.Pool(multiprocessing.cpu_count() - 1,
+    #                           initializer=initialize_values, initargs=(raw_genomes, networks)) as pool:
+    #     genomes = genomes
+    #     tries = tries
+    #     networks = networks
+    #     # restart_cb = lambda: restart_game(i)
+    #     # update_cb = lambda: update_event(i)
+    #     # add_val2 = lambda: add_val_to_fitness(i, 2)
+    #     # add_val15 = lambda: add_val_to_fitness(i, 15)
+    #     p = pool.starmap(main, [[partial(restart_game, i),
+    #                             partial(update_event, i),
+    #                             partial(add_val_to_fitness, i, 2),
+    #                             partial(add_val_to_fitness, i, 15), i] for i in range(len(raw_genomes))])
+    #
+    #     p.sort(key=lambda x: x[0], reverse=True)
+    #
+    # for raw_genome in raw_genomes:
+    #     trained = p.pop(-1)
+    #     raw_genome[1].fitness = trained[1].fitness
+
+
+def initialize_values(g, n):
+    global genomes, networks
+    genomes = g
+    networks = n
 
 
 def restart_game(gen_id):
-    global tries
+    pygame.event.post(pygame.event.Event(pygame.USEREVENT, code=0))
+    add_val_to_fitness(gen_id, -10)
 
-    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
-    genomes[gen_id].fitness -= 10
-    tries += 1
+
 def add_val_to_fitness(gen_id, val):
-    genomes[gen_id].fitness += val
+    try:
+        genomes[gen_id][1].fitness += val
+    except Exception:
+        print(genomes)
+        print(gen_id)
+        raise ValueError()
+
 
 def update_event(gen_id):
     global genomes, player_body, ball_body
-    genomes[gen_id].fitness += 0.1
+    add_val_to_fitness(gen_id, 0.001)
+    # if not (player_body.position.x > 100 and player_body.position.x < width - 100):
+    #     add_val_to_fitness(gen_id, -20)
+    #     pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
 
     output = networks[gen_id].activate(
         (ball_body.position.x, ball_body.position.y,
-         abs(player_body.position.y - ball_body.position.y),
-         abs(player_body.position.x - ball_body.position.x)))
+         abs(player_body.position.x - ball_body.position.x), abs(player_body.position.y - ball_body.position.y)))
     general_output = output.index(max(output)) - 1
 
-    player_body.velocity = (general_output*2000, 0)
+    player_body.velocity = (general_output * 2000, 0)
 
 
 def run(config_path):
@@ -288,21 +346,94 @@ def run(config_path):
                                 neat.DefaultSpeciesSet, neat.DefaultStagnation,
                                 config_path)
 
+    current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
+    GenerationCounter.current_time = current_time
+    checkpoints_dir_name = f"checkpoints {current_time}"
+    if not os.path.exists(checkpoints_dir_name):
+        os.mkdir(checkpoints_dir_name)
+
+    checkpointer = neat.Checkpointer(True, filename_prefix=f"{checkpoints_dir_name}/checkpoint_generation_")
+    checkpointer.generation = True
+    checkpointer.show_species_detail = True
+
     p = neat.Population(config)
 
     reporter = neat.reporting.StdOutReporter(True)
     reporter.generation = True
     reporter.show_species_detail = True
     p.add_reporter(neat.reporting.StdOutReporter(True))
+    p.add_reporter(checkpointer)
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
 
     winner = p.run(eval_genomes)
 
+    plot_stats(stats)
+
     print("Best fitness -> {}".format(winner))
 
 
-if __name__ == "__main__":
+def run_learning(file_name: str):
     local_dir = os.path.dirname(__file__)
-    config_path = os.path.join(local_dir, "config-FeedForward.txt")
+    config_path = os.path.join(local_dir, file_name)
     run(config_path)
+
+
+def run_generation():
+    checkpoint_paths = []
+    for path in os.walk("../"):
+        if path[0].startswith("./checkpoints"):
+            checkpoint_paths.append(path)
+
+    path_to_chkp = ""
+
+    chosen_dir = choose_checkpoint_directory([pths[0] for pths in checkpoint_paths])
+    for pth in checkpoint_paths:
+        if pth[0] == chosen_dir:
+            path_to_chkp = choose_checkpoint_directory(pth[2])
+            break
+
+    checkpoint_path = f"{chosen_dir}/{path_to_chkp}"
+    run_generation_checkpoint(checkpoint_path)
+
+
+def run_generation_checkpoint(checkpoint_path: str):
+
+    population = neat.Checkpointer.restore_checkpoint(checkpoint_path)
+    reporter = neat.reporting.StdOutReporter(True)
+    reporter.generation = True
+    reporter.show_species_detail = True
+    population.add_reporter(reporter)
+    stats = neat.StatisticsReporter()
+    population.add_reporter(stats)
+
+    try:
+
+        winner = population.run(eval_genomes, n=1)
+    except Exception:
+        pygame.quit()
+
+    # plot_stats(stats)
+
+    print("Best fitness -> {}".format(winner))
+
+
+def choose_checkpoint_directory(chckpoints: [str]) -> str:
+    value = ""
+    while not (type(value) is int):
+        c = 1
+        print("Выьерите нужный путь к чекпоинту: ")
+        for chkp in chckpoints:
+            print(f"{c}. {chkp}")
+            c += 1
+        value = input("Выберите нужный чекпоинит.")
+        if value.isalnum():
+            if len(chckpoints) >= int(value) > 0:
+                value = int(value) - 1
+                break
+        print("Вы ввели что-то не то (((. Но всегда можно попробовать еще раз!")
+    return chckpoints[value]
+
+
+if __name__ == "__main__":
+    run_learning("../NeatConf.txt")
